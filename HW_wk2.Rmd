@@ -75,13 +75,6 @@ grouped_studentsby_county <- ReportCardData3 %>%
   mutate(state_average = mean(county_avg))
 
 arrange(grouped_studentsby_county)
-
-#OLD CODE
-#state_avg <- grouped_studentsby_county %>% 
-#  mutate(state_average = sum(passed)/sum(TotalStudents))
-#  dplyr::select(County, TestSubject, GradeLevel, StudentGroup, StudentGroupType, state_average, #normalised_stateavg) %>%
-#  distinct()
-#why is the normalised value 1 for all of them?
 ```
 Now I need to create a new tibble that says how far above/below the state avg it is, need to round
 
@@ -106,11 +99,12 @@ compare_stateavg2 <- grouped_studentsby_county %>%
   mutate(., WAdiff = county_avg-46.27107) %>%
   mutate(., across(where(is.numeric), round, 2))%>%
   mutate(., across(WAdiff, round, 1)) %>% 
-  mutate(., WAcompare = case_when(county_avg >= 0.474 ~ str_c("equal or above WA average by", WAdiff, "percent", sep=" "), TRUE ~ str_c("below below the state average by", WAdiff, "percent", sep=" ")))
+  mutate(., WAcompare = case_when(county_avg >= 46.27107 ~ str_c("equal or above WA average by", WAdiff, "percent", sep=" "), TRUE ~ str_c("below below the state average by", WAdiff, "percent", sep=" "))) %>%
+  mutate(WA_abovebelow = case_when(WAdiff < 0 ~ "below", WAdiff > 0 ~ "above", WAdiff == 0 ~ "equal"))
 
 compare_stateavg3 <- compare_stateavg2%>%
   #select(County) %>% 
-  group_by(WAcompare)%>%
+  group_by(WA_abovebelow)%>%
   summarise(count=n())
 
 arrange(compare_stateavg2)
@@ -151,7 +145,10 @@ ReportCardData_Map <- WashMap %>%
   left_join(., compare_stateavg2, by = c("countylabe" = "County"))
 
 library(tmap)
-qtm(ReportCardData_Map, fill = "WAdiff", fill.palette="-Blues")
+qtm(ReportCardData_Map, fill = "WA_abovebelow", fill.palette="-Blues")
+
+library(tmap)
+qtm(ReportCardData_Map, fill = "WAdiff", fill.palette="-Greens")
 
 #I need to figure out the column name stuff
 
@@ -173,7 +170,7 @@ tmap_mode("plot")
 tm_shape(tmapWA)+
 tm_rgb()+
 tm_shape(ReportCardData_Map) + 
-tm_polygons("WAdiff", 
+tm_polygons("WA_abovebelow", 
         style="jenks",
         palette="YlOrBr",
         midpoint=NA,
