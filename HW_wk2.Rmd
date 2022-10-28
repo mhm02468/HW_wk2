@@ -1,0 +1,186 @@
+---
+title: "HW_wk2"
+output: html_document
+date: "2022-10-14"
+---
+Here, I am importing the files using red_csv and here() which specifies where I want
+```{r}
+library(here)
+library(sp)
+library(sf)
+library(tmap)
+library(tmaptools)
+library(RSQLite)
+library(tidyverse)
+library(rgdal)
+library(readr)
+library(dplyr)
+library(OpenStreetMap)
+
+
+ReportCardData1 <- read_csv("HW_wk2_data/Report_Card.csv",
+                       locale = locale(encoding = "latin1"),
+                       na = "NULL")
+              
+
+WashMap <- st_read(here::here("HW_wk2_data", "Washington_Counties_with_Natural_Shoreline___washsh_area", "Washington_Counties_with_Natural_Shoreline___washsh_area.shp"))
+
+Datatypelist <- ReportCardData1 %>% 
+  dplyr::summarise_all(class) %>%
+  tidyr::pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+  
+```
+Above: I am looking to see that the columns I want are numeric or chr. Like to calculate the avg need a number
+
+Below: Filtering rows to show all science students in all counties, then selecting columns, then checking the class of the data in each column
+```{r}
+library(janitor)
+ReportCardData1 <- ReportCardData1 %>% 
+  janitor::clean_names(., case="big_camel")
+
+
+ReportCardData2 <- ReportCardData1 %>% 
+  dplyr::filter(str_detect(TestSubject, "Science"),
+         str_detect(GradeLevel, "All Grades"),
+         str_detect(StudentGroup, "All Students"),
+         str_detect(StudentGroupType, "All"),
+         County != "Multiple") %>% distinct() %>% na.omit()
+
+ReportCardData3 <- ReportCardData2 %>%
+  janitor:: clean_names(., case="big_camel") %>%
+  select(County, TestSubject, GradeLevel, StudentGroup, StudentGroupType, CountMetStandard, CountOfStudentsExpectedToTest)
+
+rcd3_summary <- ReportCardData3 %>%
+#I don't need to assign this to an obj, I can just say ReportCardData3 %>% but this is to see class and make sure I haven't accidentally changed the type of data in the columns
+  summarise_all(class) %>% 
+    pivot_longer(everything(),
+               names_to="All_variables", 
+               values_to="Variable_class")
+```
+Then I need to group into county, make a new column with the avg, but they are currently characters so I need to make them into numeric type
+
+```{r}
+
+ReportCardData3$passed <- as.numeric(ReportCardData3$CountMetStandard)
+ReportCardData3$TotalStudents <- as.numeric(ReportCardData3$CountOfStudentsExpectedToTest)
+
+grouped_studentsby_county <- ReportCardData3 %>%
+  group_by(County) %>%
+  summarise(passed_total = sum(passed), count_totalstudents = sum(TotalStudents)) %>% 
+  mutate(county_avg = (passed_total/count_totalstudents)*100)%>%
+  mutate(state_average = mean(county_avg))
+
+arrange(grouped_studentsby_county)
+
+#OLD CODE
+#state_avg <- grouped_studentsby_county %>% 
+#  mutate(state_average = sum(passed)/sum(TotalStudents))
+#  dplyr::select(County, TestSubject, GradeLevel, StudentGroup, StudentGroupType, state_average, #normalised_stateavg) %>%
+#  distinct()
+#why is the normalised value 1 for all of them?
+```
+Now I need to create a new tibble that says how far above/below the state avg it is, need to round
+
+```{r}
+compare_stateavg <- grouped_studentsby_county %>% 
+  mutate(WAcompare = case_when(county_avg > 46.27107	 ~ "above state average", TRUE ~ "below state average"))
+#Here, I am making a tibble saying if each county's avg, or county_avg, is below or above the state's average of 0.4741048
+
+compare_stateavg1 <- compare_stateavg %>% 
+  mutate(WAdiff = county_avg - 46.27107) %>% 
+  group_by(WAcompare) %>%
+  summarise(range=max(WAdiff)-min(WAdiff), count=n(), Average=mean(WAdiff))
+#Here, I am making a tibble saying if each county's avg, or county_avg, is below or above the state's average of 0.4741048
+
+head(compare_stateavg1)
+#I just want to see what this new tibble looks like
+```
+```{r}
+#This step is to make another tibble with all the counties and saying if they are above or below the state average, by how much, etc
+
+compare_stateavg2 <- grouped_studentsby_county %>% 
+  mutate(., WAdiff = county_avg-46.27107) %>%
+  mutate(., across(where(is.numeric), round, 2))%>%
+  mutate(., across(WAdiff, round, 1)) %>% 
+  mutate(., WAcompare = case_when(county_avg >= 0.474 ~ str_c("equal or above WA average by", WAdiff, "percent", sep=" "), TRUE ~ str_c("below below the state average by", WAdiff, "percent", sep=" ")))
+
+compare_stateavg3 <- compare_stateavg2%>%
+  #select(County) %>% 
+  group_by(WAcompare)%>%
+  summarise(count=n())
+
+arrange(compare_stateavg2)
+
+#HOW DO I INCLUDE SUMMARISE HERE?
+```
+
+MAPPING, yay :)
+
+```{r}
+#setup
+#install.packages("maptools")
+#install.packages(c("classInt", "tmap"))
+#install.packages(c("RColorBrewer", "sp", "rgeos", 
+#                   "tmaptools", "sf", "downloader", "rgdal", 
+#                   "geojsonio"))
+
+library(maptools)
+library(RColorBrewer)
+library(classInt)
+library(sp)
+library(rgeos)
+library(tmap)
+library(tmaptools)
+library(sf)
+library(rgdal)
+library(geojsonio)
+
+#now read in geo-data!! Shape file was read in at the beginning of this hw
+
+#qtm(WashMap)
+
+#making more detailed map, WHAT TYPE OF JOIN DO I NEED
+clean_names(WashMap)
+
+ReportCardData_Map <- WashMap %>% 
+  clean_names() %>% 
+  left_join(., compare_stateavg2, by = c("countylabe" = "County"))
+
+library(tmap)
+qtm(ReportCardData_Map, fill = "WAdiff", fill.palette="-Blues")
+
+#I need to figure out the column name stuff
+
+#Add base map - they did two maps, one on open street map, but I don't need to do that and idk if I want to do it on open street map anyway... so I need to join the WAdiff column to the map by county as the connector then just plot it below, but I need to define tmapWA so don't delete that part. Ask Phil tho if I even need that part because maybe I can just use ReportCardData_Map, like does th tmap part of tmapWA do anything?
+
+```
+
+
+
+```{r}
+#install.packages("shinyjs")
+#palette_explorer()
+tmapWA <- ReportCardData_Map %>%
+  st_bbox(.) %>%
+  tmaptools::read_osm(., type = "osm", zoom = NULL)
+
+tmap_mode("plot")
+
+tm_shape(tmapWA)+
+tm_rgb()+
+tm_shape(ReportCardData_Map) + 
+tm_polygons("WAdiff", 
+        style="jenks",
+        palette="YlOrBr",
+        midpoint=NA,
+        title="Percent above/below state avg",
+        alpha = 0.5) + 
+  tm_compass(position = c("left", "bottom"),type = "arrow") + 
+  tm_scale_bar(position = c("left", "bottom")) +
+  tm_layout(title = "Percent above/below state avg", legend.position = c("right", "bottom"))
+```
+
